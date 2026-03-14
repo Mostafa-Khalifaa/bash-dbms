@@ -468,7 +468,6 @@ delete_from_table() {
     done
     echo ""
     
-    # get column name from user
     read -p "Enter column name: " col_name
     
     # find where this column is
@@ -494,7 +493,7 @@ delete_from_table() {
     # count rows before delete
     before=$(wc -l < "databases/$CURRENT_DB/$table_name.tbl")
     
-    # use awk to keep rows that dont match
+    # keep rows that dont match
     awk -F'|' -v pos="$position" -v val="$value" \
         '$pos != val' "databases/$CURRENT_DB/$table_name.tbl" > "databases/$CURRENT_DB/$table_name.tbl.tmp"
     
@@ -513,6 +512,129 @@ delete_from_table() {
     press_enter
 }
 
+update_table() {
+    echo ""
+    echo " Update Table "
+    
+    if ! list_tables silent; then
+        press_enter
+        return
+    fi
+    
+    read -p "Enter Table Name: " table_name
+    
+    if ! check_existance "Table" "$table_name"; then
+        press_enter
+        return
+    fi
+    
+    if [ ! -s "databases/$CURRENT_DB/$table_name.tbl" ]; then
+        echo "Table is empty."
+        press_enter
+        return
+    fi
+    
+    mapfile -t columns < <(tr '|' '\n' < "databases/$CURRENT_DB/$table_name.meta")
+    
+    pk_name=$(echo "${columns[0]}" | cut -d':' -f1)
+    
+    echo ""
+    read -p "Enter $pk_name to update: " pk_value
+    
+    if [ -z "$pk_value" ]; then
+        echo "Error: ID cannot be empty"
+        press_enter
+        return
+    fi
+    
+    # search for row
+    row=$(awk -F'|' -v id="$pk_value" '$1 == id' "databases/$CURRENT_DB/$table_name.tbl")
+    
+    if [ -z "$row" ]; then
+        echo "Error: Row not found"
+        press_enter
+        return
+    fi
+    
+    # show current row
+    echo ""
+    echo "Current row:"
+    echo "─────────────────────"
+    IFS='|' read -ra vals <<< "$row"
+    for i in "${!columns[@]}"; do
+        name=$(echo "${columns[$i]}" | cut -d':' -f1)
+        echo "  $name: ${vals[$i]}"
+    done
+    echo "─────────────────────"
+    echo ""
+    
+    # show what can be updated
+    echo "Columns:"
+    for i in "${!columns[@]}"; do
+        if [ $i -ne 0 ]; then
+            name=$(echo "${columns[$i]}" | cut -d':' -f1)
+            echo "  - $name"
+        fi
+    done
+    echo ""
+    
+    read -p "Enter column to update: " col_name
+    
+    if [ "$col_name" == "$pk_name" ]; then
+        echo "Error: Cannot update ID"
+        press_enter
+        return
+    fi
+    
+    # find column
+    col_pos=0
+    col_type=""
+    found=0
+    
+    for i in "${!columns[@]}"; do
+        name=$(echo "${columns[$i]}" | cut -d':' -f1)
+        if [ "$name" == "$col_name" ]; then
+            col_pos=$((i + 1))
+            col_type=$(echo "${columns[$i]}" | cut -d':' -f2)
+            found=1
+            break
+        fi
+    done
+    
+    if [ $found -eq 0 ]; then
+        echo "Error: Column not found"
+        press_enter
+        return
+    fi
+    
+    # get new value with validation
+    valid=0
+    while [ $valid -eq 0 ]; do
+        read -p "Enter new value ($col_type): " new_val
+        
+        if [[ "$new_val" == *"|"* ]]; then
+            echo "Error: Cannot use |"
+        
+        elif [ "$col_type" == "int" ] && [[ ! "$new_val" =~ ^[0-9]+$ ]]; then
+            echo "Error: Must be number"
+        
+        else
+            valid=1
+        fi
+    done
+    
+    # update the row
+    awk -F'|' -v OFS='|' -v id="$pk_value" -v pos="$col_pos" -v val="$new_val" \
+        '$1 == id { $pos = val } { print }' \
+        "databases/$CURRENT_DB/$table_name.tbl" > "databases/$CURRENT_DB/$table_name.tbl.tmp"
+    
+    mv "databases/$CURRENT_DB/$table_name.tbl.tmp" "databases/$CURRENT_DB/$table_name.tbl"
+    
+    echo ""
+    echo "Row updated"
+    
+    press_enter
+}
 
 db_menu() {
     choice=0
@@ -553,7 +675,7 @@ db_menu() {
                 delete_from_table
                 ;;
             7)
-                #update_tablea
+                update_table
                 ;;
 
             8)
